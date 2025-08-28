@@ -1,0 +1,32 @@
+body {
+  margin: 0;
+  background: #353E40;
+  color: #fff;
+  font-family: serif;
+  font-size: 4REM;
+  overflow-x: hidden;
+}
+canvas {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  z-index: 0;
+}
+.content {
+  position: relative;
+  z-index: 1;
+}
+section {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+h1,h2 {
+  margin: 0 0 1rem;
+  font-weight: 600;
+}
