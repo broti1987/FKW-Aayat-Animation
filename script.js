@@ -11,9 +11,9 @@ import { MeshSurfaceSampler } from 'jsm/math/MeshSurfaceSampler.js';
 /* ===========================
    CONFIG — tweak freely
 =========================== */
-const MODEL_GLTF = 'models/aayat3.glb';   // hero shell
-const BEAD_GLTF  = 'models/aayat.glb';    // small bead glb
-const HDRI_PATH  = 'env/studio.hdr';      // HDRI for gold look (optional but recommended)
+const MODEL_GLTF = new URL('./models/aayat3.glb', import.meta.url).href;
+const BEAD_GLTF  = new URL('./models/aayat.glb',   import.meta.url).href;
+const HDRI_PATH  = new URL('./env/studio.hdr',     import.meta.url).href;
 
 const PARTICLE_COUNT = 1200;   // number of beads
 const SCATTER_RADIUS = 5.0;    // outward scatter distance
