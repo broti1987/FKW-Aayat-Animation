@@ -15,7 +15,7 @@ const MODEL_GLTF = 'https://broti1987.github.io/FKW-Aayat-Animation/models/Aayat
 const BEAD_GLTF  = 'https://broti1987.github.io/FKW-Aayat-Animation/models/Aayat.glb';
 const HDRI_PATH  = 'https://broti1987.github.io/FKW-Aayat-Animation/env/studio.hdr';
 
-const PARTICLE_COUNT = 1200;   // number of beads
+const PARTICLE_COUNT = 600;   // number of beads
 const SCATTER_RADIUS = 5.0;    // outward scatter distance
 const BEAD_SCALE     = 0.03;   // bead size
 const INWARD_BIAS    = 0.075;  // how far to push beads slightly inside the shell along the normal
