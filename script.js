@@ -11,8 +11,8 @@ import { MeshSurfaceSampler } from 'jsm/math/MeshSurfaceSampler.js';
 /* ===========================
    CONFIG — tweak freely
 =========================== */
-const MODEL_GLTF = new URL('./models/aayat3.glb', import.meta.url).href;
-const BEAD_GLTF  = new URL('./models/aayat.glb',   import.meta.url).href;
+const MODEL_GLTF = new URL('https://github.com/broti1987/FKW-Aayat-Animation/raw/refs/heads/main/models/Aayat3.glb', import.meta.url).href;
+const BEAD_GLTF  = new URL('https://github.com/broti1987/FKW-Aayat-Animation/raw/refs/heads/main/models/Aayat.glb',   import.meta.url).href;
 const HDRI_PATH  = new URL('./env/studio.hdr',     import.meta.url).href;
 
 const PARTICLE_COUNT = 1200;   // number of beads
