@@ -11,10 +11,9 @@ import { MeshSurfaceSampler } from 'https://unpkg.com/three@0.155.0/examples/jsm
 /* ===========================
    CONFIG — tweak freely
 =========================== */
-// Use the *raw* URLs (these worked for you)
-const MODEL_GLTF = 'https://github.com/broti1987/FKW-Aayat-Animation/raw/refs/heads/main/models/Aayat3.glb';
-const BEAD_GLTF  = 'https://github.com/broti1987/FKW-Aayat-Animation/raw/refs/heads/main/models/Aayat.glb';
-const HDRI_PATH  = 'https://github.com/broti1987/FKW-Aayat-Animation/raw/refs/heads/main/env/studio.hdr';
+const MODEL_GLTF = 'https://broti1987.github.io/FKW-Aayat-Animation/models/Aayat3.glb';
+const BEAD_GLTF  = 'https://broti1987.github.io/FKW-Aayat-Animation/models/Aayat.glb';
+const HDRI_PATH  = 'https://broti1987.github.io/FKW-Aayat-Animation/env/studio.hdr';
 
 const PARTICLE_COUNT = 1200;   // number of beads
 const SCATTER_RADIUS = 5.0;    // outward scatter distance
