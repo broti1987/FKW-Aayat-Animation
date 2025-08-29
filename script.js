@@ -1,28 +1,29 @@
-// script.js (ES modules)
-import * as THREE from 'three';
-import { OrbitControls } from 'jsm/controls/OrbitControls.js';
-import { EffectComposer } from 'jsm/postprocessing/EffectComposer.js';
-import { RenderPass } from 'jsm/postprocessing/RenderPass.js';
-import { UnrealBloomPass } from 'jsm/postprocessing/UnrealBloomPass.js';
-import { GLTFLoader } from 'jsm/loaders/GLTFLoader.js';
-import { RGBELoader } from 'jsm/loaders/RGBELoader.js';
-import { MeshSurfaceSampler } from 'jsm/math/MeshSurfaceSampler.js';
+// script.js (ES modules, iframe-scroll aware)
+import * as THREE from 'https://unpkg.com/three@0.155.0/build/three.module.js';
+import { OrbitControls } from 'https://unpkg.com/three@0.155.0/examples/jsm/controls/OrbitControls.js';
+import { EffectComposer } from 'https://unpkg.com/three@0.155.0/examples/jsm/postprocessing/EffectComposer.js';
+import { RenderPass } from 'https://unpkg.com/three@0.155.0/examples/jsm/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'https://unpkg.com/three@0.155.0/examples/jsm/postprocessing/UnrealBloomPass.js';
+import { GLTFLoader } from 'https://unpkg.com/three@0.155.0/examples/jsm/loaders/GLTFLoader.js';
+import { RGBELoader } from 'https://unpkg.com/three@0.155.0/examples/jsm/loaders/RGBELoader.js';
+import { MeshSurfaceSampler } from 'https://unpkg.com/three@0.155.0/examples/jsm/math/MeshSurfaceSampler.js';
 
 /* ===========================
    CONFIG — tweak freely
 =========================== */
-const MODEL_GLTF = 'https://broti1987.github.io/FKW-Aayat-Animation/models/Aayat3.glb';
-const BEAD_GLTF  = 'https://broti1987.github.io/FKW-Aayat-Animation/models/Aayat.glb';
-const HDRI_PATH  = 'https://broti1987.github.io/FKW-Aayat-Animation/env/studio.hdr';
+// Use the *raw* URLs (these worked for you)
+const MODEL_GLTF = 'https://github.com/broti1987/FKW-Aayat-Animation/raw/refs/heads/main/models/Aayat3.glb';
+const BEAD_GLTF  = 'https://github.com/broti1987/FKW-Aayat-Animation/raw/refs/heads/main/models/Aayat.glb';
+const HDRI_PATH  = 'https://github.com/broti1987/FKW-Aayat-Animation/raw/refs/heads/main/env/studio.hdr';
 
-const PARTICLE_COUNT = 600;   // number of beads
+const PARTICLE_COUNT = 1200;   // number of beads
 const SCATTER_RADIUS = 5.0;    // outward scatter distance
-const BEAD_SCALE     = 0.03;   // bead size
-const INWARD_BIAS    = 0.075;  // how far to push beads slightly inside the shell along the normal
+const BEAD_SCALE     = 0.04;   // bead size
+const INWARD_BIAS    = 0.075;  // push beads slightly inside the shell
 
 // Fade controls
 const FADE_DURATION = 0.05;    // seconds; set 0 for instant dissolve
-const FADE_EASE = (t)=> t*t*(3 - 2*t); // smoothstep-like ease
+const FADE_EASE     = (t)=> t*t*(3 - 2*t); // smoothstep-like ease
 
 /* ===========================
    STATE
@@ -40,9 +41,26 @@ let instanceQuat = null;     // Quaternion[] aligned to normals
 let backgroundStars = null;
 
 let scatterStrength = 0;
-let heroOpacity = 1.0;       // <-- NEW: reversible fade control
+let heroOpacity = 1.0;
 
 const clock = new THREE.Clock();
+
+/* ============
+   Webflow/iframe scroll proxy
+   - Parent should postMessage({type:'wf-scroll', scrollY}) on scroll
+============= */
+let externalScrollY = 0;
+let useExternalScroll = false;
+window.addEventListener('message', (e) => {
+  const d = e?.data;
+  if (d && d.type === 'wf-scroll' && typeof d.scrollY === 'number') {
+    externalScrollY = d.scrollY;
+    useExternalScroll = true;
+  }
+});
+function getScrollY() {
+  return useExternalScroll ? externalScrollY : window.scrollY;
+}
 
 /* ===========================
    INIT
@@ -65,12 +83,12 @@ async function init() {
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.25;
 
-  // Minimal lights (static). Gold will primarily come from HDRI.
-  const dir1 = new THREE.DirectionalLight(0xffffff, 0.2);
+  // Minimal lights (gold look is mainly from HDRI)
+  const dir1 = new THREE.DirectionalLight(0xffffff, 0.6);
   dir1.position.set(-3,-3,5);
   scene.add(dir1);
 
-  const dir2 = new THREE.DirectionalLight(0xffffff, 0.2);
+  const dir2 = new THREE.DirectionalLight(0xffffff, 0.4);
   dir2.position.set(8,12,-12);
   scene.add(dir2);
 
@@ -92,13 +110,15 @@ async function init() {
 
   // Shared gold PBR base (will clone for hero to control opacity independently)
   const baseGold = new THREE.MeshStandardMaterial({
-    color: 0xC4A46D,     // warm gold hue
+    color: 0xC4A46D,
     metalness: 1.0,
     roughness: 0.25,
-    envMapIntensity: 1
+    envMapIntensity: 1.5,
+    transparent: true,   // needed to fade beads too
+    opacity: 0.0         // beads start invisible (will fade in)
   });
 
-  // Load HDRI (optional, but recommended for gold look)
+  // Load HDRI (for gold reflections)
   try {
     const pmrem = new THREE.PMREMGenerator(renderer);
     const hdr = await new RGBELoader().loadAsync(HDRI_PATH);
@@ -109,7 +129,7 @@ async function init() {
     console.warn('HDRI load failed or skipped — gold will be less reflective.', e);
   }
 
-  // Now load the hero and bead, build the particle system
+  // Load the hero and bead, build the particle system
   const [beadGeom, hero] = await Promise.all([
     loadBeadGeometry(BEAD_GLTF),
     loadHero(MODEL_GLTF)
@@ -117,9 +137,8 @@ async function init() {
 
   // Materials: clone baseGold for hero so we can fade hero independently
   goldBeadMaterial = baseGold;                  // beads use baseGold
-  heroMaterial     = baseGold.clone();          // hero uses a clone
-  heroMaterial.transparent = true;
-  heroMaterial.opacity = 1.0;
+  heroMaterial     = baseGold.clone();          // hero uses a clone (separate opacity)
+  heroMaterial.opacity = 1.0;                   // hero visible on load
 
   // Apply hero material and collect hero meshes
   heroMeshes = [];
@@ -139,7 +158,7 @@ async function init() {
   offsets       = makeScatterOffsets(positions.length/3, SCATTER_RADIUS);
   instanceQuat  = makeQuatsFromNormals(normals);
 
-  // Build instanced beads (visible on load)
+  // Build instanced beads (start invisible via material.opacity=0)
   particles = buildBeads(beadGeom, goldBeadMaterial, basePositions, instanceQuat, BEAD_SCALE);
   particles.visible = true;
   scene.add(particles);
@@ -163,7 +182,6 @@ async function loadBeadGeometry(path){
     if (ch.isMesh && !geo) geo = ch.geometry.clone();
   });
   if (!geo) {
-    // fallback small sphere
     geo = new THREE.SphereGeometry(0.02, 12, 12);
   }
   if (!geo.attributes.normal) {
@@ -300,7 +318,7 @@ function buildBeads(geom, material, posArray, quats, scale){
 }
 
 /* ===========================
-   HERO OPACITY CONTROL
+   OPACITY HELPERS
 =========================== */
 function setHeroOpacity(alpha){
   const a = THREE.MathUtils.clamp(alpha, 0, 1);
@@ -308,6 +326,15 @@ function setHeroOpacity(alpha){
   if (heroMaterial){
     heroMaterial.opacity = a;
     heroMaterial.needsUpdate = true;
+  }
+}
+function setBeadOpacity(alpha){
+  const a = THREE.MathUtils.clamp(alpha, 0, 1);
+  if (particles && particles.material) {
+    particles.material.opacity = a;
+    particles.material.transparent = true;
+    particles.material.depthWrite = a >= 1.0; // avoid sorting artifacts while fading
+    particles.material.needsUpdate = true;
   }
 }
 
@@ -355,16 +382,18 @@ function animate(){
     backgroundStars.rotation.x = Math.sin(t*0.05)*0.01;
   }
 
-  // reversible fade based on scroll position
-  const scrolled = window.scrollY > 0 ? 1 : 0;          // target 0 (top) or 1 (scrolled)
-  const targetOpacity = 1 - scrolled;                   // hero 1 at top, 0 when scrolled
-  const step = FADE_DURATION > 0 ? Math.min(1, dt/FADE_DURATION) : 1;
-  const easedStep = FADE_EASE(step);
-  setHeroOpacity(THREE.MathUtils.lerp(heroOpacity, targetOpacity, easedStep));
+  // Fade both ways based on scroll (0 at top → hero=1, beads=0; scrolled → hero=0, beads=1)
+  const target = getScrollY() > 0 ? 0 : 1; // hero: target opacity
+  const step   = FADE_DURATION > 0 ? Math.min(1, dt/FADE_DURATION) : 1;
+  const eased  = FADE_EASE(step);
+  const newHero = THREE.MathUtils.lerp(heroOpacity, target, eased);
+  setHeroOpacity(newHero);
+  // Beads are inverse of hero
+  setBeadOpacity(1 - newHero);
 
-  // Scatter beads with scroll (independent of fade)
+  // Scatter beads with scroll
   if (particles && basePositions && offsets){
-    scatterStrength = THREE.MathUtils.clamp(window.scrollY / innerHeight, 0, 1);
+    scatterStrength = THREE.MathUtils.clamp(getScrollY() / innerHeight, 0, 1);
     const s = scatterStrength;
 
     const dummy = new THREE.Object3D();
