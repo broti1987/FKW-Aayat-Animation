@@ -21,7 +21,7 @@ const BEAD_SCALE     = 0.04;   // bead size
 const INWARD_BIAS    = 0.075;  // push beads slightly inside the shell
 
 // Fade controls
-const FADE_DURATION = 0.05;    // seconds; set 0 for instant dissolve
+const FADE_DURATION = 0;    // seconds; set 0 for instant dissolve
 const FADE_EASE     = (t)=> t*t*(3 - 2*t); // smoothstep-like ease
 
 /* ===========================
