@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>FKW • Aayat Scroll → Scatter Particles</title>
   <link rel="stylesheet" href="styles.css" />
+
   <script type="importmap">
     {
       "imports": {
@@ -14,15 +15,20 @@
     }
   </script>
 </head>
-<body>
-  <canvas id="webgl"></canvas>
-  <div class="content">
-   <section id="s1"></section>
-    <section id="s2"></section>
 
+<body>
+  <!-- Loader (thin gradient line) -->
+  <div id="page-loader" aria-hidden="true">
+    <div id="page-loader-bar"></div>
   </div>
 
+  <canvas id="webgl"></canvas>
 
-<script type="module" src="script.js"></script>
+  <div class="content">
+    <section id="s1"></section>
+    <section id="s2"></section>
+  </div>
+
+  <script type="module" src="script.js"></script>
 </body>
 </html>
