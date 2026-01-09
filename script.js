@@ -18,7 +18,7 @@ const loaderBarEl = document.getElementById('page-loader-bar');
 function loaderSet(p) {
   if (!loaderBarEl) return;
   const v = Math.max(0.06, Math.min(1, p)); // keep it visible
-  loaderBarEl.style.transform = `scaleX(${v})`;
+  loaderBarEl.style.transform = `translateX(-50%) scaleX(${v})`;
 }
 function loaderDone() {
   if (!loaderEl) return;
