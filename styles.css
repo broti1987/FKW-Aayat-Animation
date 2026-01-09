@@ -1,11 +1,13 @@
 body {
   margin: 0;
-  background: #000000;
+  background: #fefef1;
   color: #fff;
   font-family: serif;
-  font-size: 4REM;
+  font-size: 4rem;
   overflow-x: hidden;
 }
+
+/* WebGL canvas */
 canvas {
   position: fixed;
   top: 0;
@@ -15,10 +17,13 @@ canvas {
   display: block;
   z-index: 0;
 }
+
+/* Foreground scrolling content */
 .content {
   position: relative;
   z-index: 1;
 }
+
 section {
   min-height: 100vh;
   display: flex;
@@ -26,7 +31,31 @@ section {
   justify-content: center;
   text-align: center;
 }
-h1,h2 {
+
+h1, h2 {
   margin: 0 0 1rem;
   font-weight: 600;
+}
+
+/* ---------------- LOADER (CENTER) ---------------- */
+#page-loader{
+  position: fixed;
+  top: 50%;
+  left: 0;
+  width: 100vw;
+  height: 2px;                 /* thin line */
+  transform: translateY(-50%);
+  z-index: 2147483647;         /* always on top */
+  pointer-events: none;
+  opacity: 1;
+  visibility: visible;
+}
+
+#page-loader-bar{
+  width: 100%;
+  height: 100%;
+  transform-origin: 0 50%;
+  transform: scaleX(0.06);     /* visible immediately */
+  background: linear-gradient(90deg, #57C8DF, #F2DCB9, #F89B57);
+  will-change: transform;
 }
