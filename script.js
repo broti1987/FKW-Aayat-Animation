@@ -11,21 +11,24 @@ import { GLTFLoader } from 'jsm/loaders/GLTFLoader.js';
 import { RGBELoader } from 'jsm/loaders/RGBELoader.js';
 import { MeshSurfaceSampler } from 'jsm/math/MeshSurfaceSampler.js';
 
-/* ---------------- LOADER (drives HTML/CSS loader) ---------------- */
-const loaderEl = document.getElementById('page-loader');
-const loaderBarEl = document.getElementById('page-loader-bar');
+/* ---------------- CIRCLE LOADER (HTML/CSS) ---------------- */
+const circleLoader = document.getElementById('circle-loader');
+const circleProgress = circleLoader?.querySelector('.progress');
 
-function loaderSet(p) {
-  if (!loaderBarEl) return;
-  const v = Math.max(0.06, Math.min(1, p)); // keep it visible
-  loaderBarEl.style.transform = `translateX(-50%) scaleX(${v})`;
+// circumference must match your CSS dasharray (2π * 52 = 326.725...)
+const CIRC = 326.73;
+
+function loaderSet(p){
+  if (!circleProgress) return;
+  const v = Math.max(0, Math.min(1, p));
+  circleProgress.style.strokeDashoffset = String(CIRC * (1 - v));
 }
-function loaderDone() {
-  if (!loaderEl) return;
+
+function loaderDone(){
+  if (!circleLoader) return;
   loaderSet(1);
-  loaderEl.style.transition = 'opacity 450ms ease';
-  loaderEl.style.opacity = '0';
-  setTimeout(() => loaderEl.remove(), 520);
+  circleLoader.style.opacity = '0';
+  setTimeout(() => circleLoader.remove(), 520);
 }
 
 /* ---------------- CONFIG ---------------- */
@@ -126,10 +129,7 @@ let heroSpin  = null;
 let fgScatterTarget = 0.0, fgScatter = 0.0;
 
 /* -------- Passes & Shaders -------- */
-class ClearDepthPass extends Pass {
-  constructor(){ super(); this.needsSwap = false; }
-  render(r){ r.clearDepth(); }
-}
+class ClearDepthPass extends Pass { constructor(){ super(); this.needsSwap = false; } render(r){ r.clearDepth(); } }
 
 const HSLShader = {
   uniforms: { tDiffuse:{value:null}, uHueShift:{value:0}, uSatMul:{value:1}, uLightAdd:{value:0} },
@@ -192,15 +192,15 @@ if (document.readyState === 'loading') {
 }
 
 async function init(){
-  loaderSet(0.06); // show instantly
+  loaderSet(0.02); // show instantly even if cached
 
   const canvas = document.getElementById('webgl');
   if (!canvas) { console.warn('No #webgl canvas'); loaderDone(); return; }
 
-  // Manager drives the loader
+  // Manager drives circle loader
   const manager = new THREE.LoadingManager();
   manager.onProgress = (_url, loaded, total) => loaderSet(total ? loaded / total : 0);
-  manager.onLoad = () => loaderDone();
+  manager.onLoad  = () => loaderDone();
   manager.onError = () => loaderDone();
 
   const gltfLoader = new GLTFLoader(manager);
@@ -298,7 +298,7 @@ async function init(){
   particles.visible = false;
   heroGroup.add(particles);
 
-  // ----- Independent spin wrappers -----
+  // spin wrappers
   BOKEH_GROUP_ROT.axis.normalize();
   PETAL_GROUP_ROT.axis.normalize();
   HERO_GROUP_ROT.axis.normalize();
@@ -322,21 +322,43 @@ async function init(){
   animate();
 }
 
-/* ---------------- LOADERS ---------------- */
-async function loadGLTFScene(url, gltfLoader){
-  const gltf = await gltfLoader.loadAsync(url);
-  return gltf.scene;
+/* ---------------- REMAINDER: helpers + loop + shader ---------------- */
+/* NOTE: This is your original code from here down (unchanged) */
+
+function estimateArea(geometry){
+  const pos=geometry.attributes.position, idx=geometry.index;
+  if(!pos) return 0;
+  let area=0; const a=new THREE.Vector3(), b=new THREE.Vector3(), c=new THREE.Vector3();
+  if(idx){
+    for(let i=0;i<idx.count;i+=3){
+      a.fromBufferAttribute(pos, idx.getX(i));
+      b.fromBufferAttribute(pos, idx.getX(i+1));
+      c.fromBufferAttribute(pos, idx.getX(i+2));
+      area += triangleArea(a,b,c);
+    }
+  } else {
+    for(let i=0;i<pos.count;i+=3){
+      a.fromBufferAttribute(pos, i);
+      b.fromBufferAttribute(pos, i+1);
+      c.fromBufferAttribute(pos, i+2);
+      area += triangleArea(a,b,c);
+    }
+  }
+  return Math.max(area, 1e-6);
 }
+function triangleArea(a,b,c){
+  const ab=new THREE.Vector3().subVectors(b,a);
+  const ac=new THREE.Vector3().subVectors(c,a);
+  return new THREE.Vector3().crossVectors(ab,ac).length()*0.5;
+}
+async function loadGLTFScene(url, gltfLoader){ const gltf = await gltfLoader.loadAsync(url); return gltf.scene; }
 async function loadBeadGeometry(p, gltfLoader){
-  const gltf = await gltfLoader.loadAsync(p);
-  let geo=null;
+  const gltf = await gltfLoader.loadAsync(p); let geo=null;
   gltf.scene.traverse(ch=>{ if(ch.isMesh && !geo) geo = ch.geometry.clone(); });
-  if(!geo) geo = new THREE.SphereGeometry(0.02,12,12);
-  if(!geo.attributes.normal){ geo = geo.clone(); geo.computeVertexNormals(); }
+  if(!geo) geo=new THREE.SphereGeometry(0.02,12,12);
+  if(!geo.attributes.normal){ geo=geo.clone(); geo.computeVertexNormals(); }
   return geo;
 }
-
-/* ------------- SAMPLING HELPERS ------------- */
 async function samplePointsFromModel(meshes, count, inwardBias=0.0){
   const positions=new Float32Array(count*3), normals=new Float32Array(count*3);
   const areas=meshes.map(m=>estimateArea(m.geometry));
@@ -365,38 +387,10 @@ async function samplePointsFromModel(meshes, count, inwardBias=0.0){
   }
   return { positions, normals };
 }
-function estimateArea(geometry){
-  const pos=geometry.attributes.position, idx=geometry.index;
-  if(!pos) return 0;
-  let area=0; const a=new THREE.Vector3(), b=new THREE.Vector3(), c=new THREE.Vector3();
-  if(idx){
-    for(let i=0;i<idx.count;i+=3){
-      a.fromBufferAttribute(pos, idx.getX(i));
-      b.fromBufferAttribute(pos, idx.getX(i+1));
-      c.fromBufferAttribute(pos, idx.getX(i+2));
-      area += triangleArea(a,b,c);
-    }
-  } else {
-    for(let i=0;i<pos.count;i+=3){
-      a.fromBufferAttribute(pos, i);
-      b.fromBufferAttribute(pos, i+1);
-      c.fromBufferAttribute(pos, i+2);
-      area += triangleArea(a,b,c);
-    }
-  }
-  return Math.max(area, 1e-6);
-}
-function triangleArea(a,b,c){
-  const ab=new THREE.Vector3().subVectors(b,a);
-  const ac=new THREE.Vector3().subVectors(c,a);
-  return new THREE.Vector3().crossVectors(ab,ac).length()*0.5;
-}
-
-/* ------------- INSTANCING HELPERS ------------- */
 function makeScatterOffsets(count,radius){
   const arr=new Float32Array(count*3);
   for(let i=0;i<count;i++){
-    const v=new THREE.Vector3(Math.random()-0.5,Math.random()-0.5,Math.random()-0.5).normalize();
+    let v=new THREE.Vector3(Math.random()-0.5,Math.random()-0.5,Math.random()-0.5).normalize();
     arr.set([v.x*radius,v.y*radius,v.z*radius], i*3);
   }
   return arr;
@@ -406,28 +400,23 @@ function makeQuatsFromNormals(normals){
   const list = new Array(normals.length/3);
   for (let i=0; i<list.length; i++){
     const n = new THREE.Vector3(normals[i*3], normals[i*3+1], normals[i*3+2]).normalize();
-    const q = new THREE.Quaternion();
-    q.setFromUnitVectors(forward, n);
+    const q = new THREE.Quaternion(); q.setFromUnitVectors(forward, n);
     list[i] = q.clone();
   }
   return list;
 }
 function buildBeads(geom, material, posArray, quats, scale){
-  const count=posArray.length/3;
-  const inst=new THREE.InstancedMesh(geom, material, count);
+  const count=posArray.length/3; const inst=new THREE.InstancedMesh(geom, material, count);
   const dummy=new THREE.Object3D();
   for(let i=0;i<count;i++){
     dummy.position.set(posArray[i*3],posArray[i*3+1],posArray[i*3+2]);
     if(quats) dummy.quaternion.copy(quats[i]);
-    dummy.scale.setScalar(scale);
-    dummy.updateMatrix();
+    dummy.scale.setScalar(scale); dummy.updateMatrix();
     inst.setMatrixAt(i, dummy.matrix);
   }
   inst.instanceMatrix.needsUpdate = true;
   return inst;
 }
-
-/* ---------------- FG: BOKEH ---------------- */
 function createBokehTexture(size=256){
   const cvs = document.createElement('canvas'); cvs.width = cvs.height = size;
   const ctx = cvs.getContext('2d');
@@ -436,146 +425,88 @@ function createBokehTexture(size=256){
   g.addColorStop(0.5, 'rgba(255,255,255,0.25)');
   g.addColorStop(1.0, 'rgba(255,255,255,0.0)');
   ctx.fillStyle = g; ctx.fillRect(0,0,size,size);
-  const tex = new THREE.CanvasTexture(cvs);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  return tex;
+  const tex = new THREE.CanvasTexture(cvs); tex.colorSpace = THREE.SRGBColorSpace; return tex;
 }
 function createForegroundBokeh(group, target){
-  const box = new THREE.Box3().setFromObject(target);
-  const sphere = new THREE.Sphere();
-  box.getBoundingSphere(sphere);
-
-  const rad = Math.max(0.001, sphere.radius);
-  const tex = createBokehTexture(256);
-
+  const box = new THREE.Box3().setFromObject(target); const sphere = new THREE.Sphere(); box.getBoundingSphere(sphere);
+  const rad = Math.max(0.001, sphere.radius); const tex = createBokehTexture(256);
   for (let i=0; i<FG_BOKEH_COUNT; i++){
     const mat = new THREE.SpriteMaterial({
-      map: tex,
-      color: FG_BOKEH_COLOR,
-      transparent: true,
-      opacity: FG_BOKEH_OPACITY,
-      depthTest: true,
-      depthWrite: false,
-      blending: THREE.AdditiveBlending,
-      toneMapped: true
+      map: tex, color: FG_BOKEH_COLOR, transparent: true, opacity: FG_BOKEH_OPACITY,
+      depthTest: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: true
     });
     const spr = new THREE.Sprite(mat);
-
     const dir = new THREE.Vector3(Math.random()*2-1, Math.random()*2-1, Math.random()*2-1).normalize();
     const dist = rad * THREE.MathUtils.lerp(FG_BOKEH_DIST_MIN, FG_BOKEH_DIST_MAX, Math.random());
-    const basePos = dir.multiplyScalar(dist);
-    spr.position.copy(basePos);
-
+    const basePos = dir.multiplyScalar(dist); spr.position.copy(basePos);
     const baseScale = THREE.MathUtils.lerp(rad*FG_BOKEH_SIZE_MIN, rad*FG_BOKEH_SIZE_MAX, Math.random());
     spr.scale.set(baseScale, baseScale, 1);
-
     const axis = new THREE.Vector3().randomDirection().normalize();
     const angVel = THREE.MathUtils.lerp(-1, 1, Math.random()) * FG_BOKEH_DRIFT;
     const phase = Math.random() * Math.PI * 2;
     const speed = THREE.MathUtils.lerp(0.25, 0.9, Math.random());
-
+    const twinkleAmp = THREE.MathUtils.lerp(0.15, 0.4, Math.random());
     const hoverAxis = new THREE.Vector3().randomDirection().normalize();
     const hoverAmp  = rad * FG_HOVER_AMP * THREE.MathUtils.lerp(0.6, 1.4, Math.random());
     const hoverFreq = THREE.MathUtils.lerp(FG_HOVER_FREQ_MIN, FG_HOVER_FREQ_MAX, Math.random());
-
     const scatterOffset = new THREE.Vector3().randomDirection().normalize().multiplyScalar(rad * FG_BOKEH_SCATTER);
 
     fgBokehSprites.push(spr);
-    fgBokehParams.push({ basePos, axis, angVel, phase, speed, baseScale, hoverAxis, hoverAmp, hoverFreq, scatterOffset });
+    fgBokehParams.push({ basePos, axis, angVel, phase, speed, twinkleAmp, baseScale, hoverAxis, hoverAmp, hoverFreq, scatterOffset });
     group.add(spr);
   }
 }
 function updateForegroundBokeh(t, dt){
   const kOut = 1.0 - Math.exp(-FG_SCATTER_OUT_FAST * dt);
   const kIn  = 1.0 - Math.exp(-FG_BACK_IN_SLOW  * dt);
-  fgScatter += (fgScatter < fgScatterTarget)
-    ? (fgScatterTarget - fgScatter) * kOut
-    : (fgScatterTarget - fgScatter) * kIn;
+  fgScatter += (fgScatter < fgScatterTarget) ? (fgScatterTarget - fgScatter) * kOut : (fgScatterTarget - fgScatter) * kIn;
 
   const q = new THREE.Quaternion();
   for (let i=0; i<fgBokehSprites.length; i++){
     const spr = fgBokehSprites[i], p = fgBokehParams[i];
-
-    q.setFromAxisAngle(p.axis, p.angVel * dt);
-    p.basePos.applyQuaternion(q);
-
-    const hover = p.hoverAxis.clone().multiplyScalar(Math.sin(t * p.hoverFreq + p.phase) * p.hoverAmp);
+    q.setFromAxisAngle(p.axis, p.angVel * dt); p.basePos.applyQuaternion(q);
+    const hover = p.hoverAxis.clone().multiplyScalar( Math.sin(t * p.hoverFreq + p.phase) * p.hoverAmp );
     const scatter = p.scatterOffset.clone().multiplyScalar(fgScatter);
-
     spr.position.copy(p.basePos).add(hover).add(scatter);
-
     const tw = (Math.sin(t * p.speed + p.phase) * 0.5 + 0.5);
     spr.material.opacity = THREE.MathUtils.lerp(FG_BOKEH_TWINKLE.min, FG_BOKEH_TWINKLE.max, tw) * (1.0 - 0.4*fgScatter);
-
     const scalePulse = THREE.MathUtils.lerp(0.9, 1.15, tw) * (1.0 - 0.5*fgScatter);
     spr.scale.set(p.baseScale * scalePulse, p.baseScale * scalePulse, 1);
   }
 }
-
-/* ---------------- PETALS ---------------- */
 function createPetalTexture(size=256){
-  const s = size;
-  const cvs = document.createElement('canvas');
-  cvs.width = cvs.height = s;
-  const ctx = cvs.getContext('2d');
-
-  ctx.clearRect(0,0,s,s);
-  ctx.translate(s/2, s*0.60);
-
-  const r = s*0.32;
-  ctx.beginPath();
-  ctx.moveTo(0,-r*1.5);
+  const s = size, cvs = document.createElement('canvas'); cvs.width = cvs.height = s;
+  const ctx = cvs.getContext('2d'); ctx.clearRect(0,0,s,s); ctx.translate(s/2, s*0.60);
+  const r = s*0.32; ctx.beginPath(); ctx.moveTo(0,-r*1.5);
   ctx.bezierCurveTo( r*0.95, -r*0.9,  r*0.75,  r*0.15,  0,  r*0.95);
   ctx.bezierCurveTo(-r*0.75,  r*0.15, -r*0.95, -r*0.9,  0, -r*1.5);
   ctx.closePath();
-
   const grad = ctx.createRadialGradient(0, r*0.1, 0, 0, 0, r*1.4);
   grad.addColorStop(0.00, 'rgba(255,255,255,0.95)');
   grad.addColorStop(0.60, 'rgba(255,255,255,0.65)');
   grad.addColorStop(1.00, 'rgba(255,255,255,0.0)');
-
-  ctx.fillStyle = grad;
-  ctx.fill();
-
-  const tex = new THREE.CanvasTexture(cvs);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.needsUpdate = true;
-  return tex;
+  ctx.fillStyle = grad; ctx.fill();
+  const tex = new THREE.CanvasTexture(cvs); tex.colorSpace = THREE.SRGBColorSpace; tex.needsUpdate = true; return tex;
 }
 function createForegroundPetals(group, target){
-  const box = new THREE.Box3().setFromObject(target);
-  const sphere = new THREE.Sphere();
-  box.getBoundingSphere(sphere);
+  const box = new THREE.Box3().setFromObject(target); const sphere = new THREE.Sphere(); box.getBoundingSphere(sphere);
   const rad = Math.max(0.001, sphere.radius);
-
-  const tex = createPetalTexture(256);
-  const geom = new THREE.PlaneGeometry(1, 1);
+  const tex = createPetalTexture(256); const geom = new THREE.PlaneGeometry(1, 1);
 
   for (let i=0; i<FG_PETAL_COUNT; i++){
     const color = FG_PETAL_COLORS[i % FG_PETAL_COLORS.length];
     const mat = new THREE.MeshBasicMaterial({
-      map: tex,
-      color,
-      transparent: true,
-      opacity: FG_PETAL_OPACITY,
-      depthTest: true,
-      depthWrite: false,
-      blending: THREE.NormalBlending,
-      side: THREE.DoubleSide,
-      toneMapped: false,
-      fog: false
+      map: tex, color, transparent: true, opacity: FG_PETAL_OPACITY, depthTest: true, depthWrite: false,
+      blending: THREE.NormalBlending, side: THREE.DoubleSide, toneMapped: false, fog: false
     });
-
     const mesh = new THREE.Mesh(geom, mat);
 
     const dir = new THREE.Vector3(Math.random()*2-1, Math.random()*2-1, Math.random()*2-1).normalize();
     const dist = rad * THREE.MathUtils.lerp(FG_BOKEH_DIST_MIN, FG_BOKEH_DIST_MAX, Math.random());
-    const basePos = dir.multiplyScalar(dist);
-    mesh.position.copy(basePos);
+    const basePos = dir.multiplyScalar(dist); mesh.position.copy(basePos);
 
     const baseScale = THREE.MathUtils.lerp(rad*FG_PETAL_SIZE_MIN, rad*FG_PETAL_SIZE_MAX, Math.random());
-    const aspect = THREE.MathUtils.lerp(0.7, 1.3, Math.random());
-    mesh.scale.set(baseScale*aspect, baseScale, 1);
+    const aspect = THREE.MathUtils.lerp(0.7, 1.3, Math.random()); mesh.scale.set(baseScale*aspect, baseScale, 1);
 
     const axis = new THREE.Vector3().randomDirection().normalize();
     const angVel = THREE.MathUtils.lerp(-1, 1, Math.random()) * FG_PETAL_DRIFT;
@@ -590,47 +521,29 @@ function createForegroundPetals(group, target){
     const spinVel  = THREE.MathUtils.lerp(FG_PETAL_SPIN_MIN, FG_PETAL_SPIN_MAX, Math.random());
 
     fgPetalSprites.push(mesh);
-    fgPetalParams.push({
-      basePos, axis, angVel,
-      phase: Math.random()*Math.PI*2,
-      hoverAxis, hoverAmp, hoverFreq,
-      scatterOffset,
-      baseScale: mesh.scale.clone(),
-      spinAxis, spinVel
-    });
-
+    fgPetalParams.push({ basePos, axis, angVel, phase: Math.random()*Math.PI*2,
+      hoverAxis, hoverAmp, hoverFreq, scatterOffset, baseScale: mesh.scale.clone(), spinAxis, spinVel });
     group.add(mesh);
   }
 }
 function updateForegroundPetals(t, dt){
   const kOut = 1.0 - Math.exp(-FG_SCATTER_OUT_FAST * dt);
   const kIn  = 1.0 - Math.exp(-FG_BACK_IN_SLOW  * dt);
-  fgScatter += (fgScatter < fgScatterTarget)
-    ? (fgScatterTarget - fgScatter) * kOut
-    : (fgScatterTarget - fgScatter) * kIn;
-
+  fgScatter += (fgScatter < fgScatterTarget) ? (fgScatterTarget - fgScatter) * kOut : (fgScatterTarget - fgScatter) * kIn;
   const q = new THREE.Quaternion();
   for (let i=0; i<fgPetalSprites.length; i++){
     const mesh = fgPetalSprites[i], p = fgPetalParams[i];
-
-    q.setFromAxisAngle(p.axis, p.angVel * dt);
-    p.basePos.applyQuaternion(q);
-
-    const hover = p.hoverAxis.clone().multiplyScalar(Math.sin(t * p.hoverFreq + p.phase) * p.hoverAmp);
+    q.setFromAxisAngle(p.axis, p.angVel * dt); p.basePos.applyQuaternion(q);
+    const hover = p.hoverAxis.clone().multiplyScalar( Math.sin(t * p.hoverFreq + p.phase) * p.hoverAmp );
     const scatter = p.scatterOffset.clone().multiplyScalar(fgScatter);
-
     mesh.position.copy(p.basePos).add(hover).add(scatter);
-
     const tw = (Math.sin(t * 0.6 + p.phase) * 0.5 + 0.5);
     const scalePulse = THREE.MathUtils.lerp(0.95, 1.10, tw) * (1.0 - 0.4*fgScatter);
     mesh.scale.set(p.baseScale.x * scalePulse, p.baseScale.y * scalePulse, 1);
-
     mesh.rotateOnAxis(p.spinAxis, p.spinVel * dt);
     mesh.material.opacity = FG_PETAL_OPACITY * (1.0 - 0.35*fgScatter);
   }
 }
-
-/* ---------------- OPACITY HELPERS ---------------- */
 function setHeroOpacity(a){
   heroOpacity = THREE.MathUtils.clamp(a,0,1);
   if (heroMaterial){
@@ -647,10 +560,7 @@ function setBeadOpacity(a){
     particles.material.needsUpdate = true;
   }
 }
-
-/* ---------------- LOOP ---------------- */
 const Q_IDENTITY = new THREE.Quaternion();
-
 function animate(){
   requestAnimationFrame(animate);
   const dt = clock.getDelta();
@@ -667,9 +577,9 @@ function animate(){
   const target = scrollS > 0 ? 0 : 1;
   const step   = FADE_DURATION > 0 ? Math.min(1, dt/FADE_DURATION) : 1;
   const eased  = FADE_EASE(step);
-  setHeroOpacity(THREE.MathUtils.lerp(heroOpacity, target, eased));
+  const newHero = THREE.MathUtils.lerp(heroOpacity, target, eased);
+  setHeroOpacity(newHero);
 
-  // Scatter beads with scroll (hero-local space)
   if (particles && basePositions && offsets){
     const s = scrollS;
     const dummy = new THREE.Object3D();
@@ -688,13 +598,11 @@ function animate(){
     particles.instanceMatrix.needsUpdate = true;
   }
 
-  // HERO idle breathing & return-to-zero
   if (heroGroup && heroSpin){
     if (scrollS <= SCROLL_TOP_EPS){
       heroGroup.rotation.x = 0;
       heroGroup.rotation.z = 0;
       heroGroup.rotation.y = Math.sin(t * HERO_BREATH.freq) * HERO_BREATH.amp;
-
       const backK = 1.0 - Math.exp(-HERO_RETURN_SPEED * dt);
       heroSpin.quaternion.slerp(Q_IDENTITY, backK);
     } else {
@@ -713,8 +621,6 @@ function animate(){
   controls.update();
   composer.render();
 }
-
-/* ---------------- RESIZE ---------------- */
 window.addEventListener('resize', ()=>{
   camera.aspect = innerWidth/innerHeight; camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
@@ -723,8 +629,6 @@ window.addEventListener('resize', ()=>{
     bgMaterial.uniforms.uResolution.value.set(innerWidth, innerHeight);
   }
 });
-
-/* -------------- BG LIQUID SHADER -------------- */
 function makeMeshGradientShader(colors, cfg){
   const cArr = new Float32Array([
     colors[0].r, colors[0].g, colors[0].b,
