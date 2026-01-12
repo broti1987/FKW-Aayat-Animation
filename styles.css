@@ -1,6 +1,6 @@
 body {
   margin: 0;
-  background: #F0E0D1;
+  background: #fefef1;
   color: #fff;
   font-family: serif;
   font-size: 4rem;
@@ -16,7 +16,6 @@ canvas {
   height: 100%;
   display: block;
   z-index: 0;
-  overflow: hidden;
 }
 
 /* Foreground scrolling content */
@@ -38,27 +37,38 @@ h1, h2 {
   font-weight: 600;
 }
 
-/* ---------------- LOADER (CENTER) ---------------- */
-#page-loader{
+/* -------- Circle Loader -------- */
+#circle-loader{
   position: fixed;
-  top: 50%;
-  left: 0;
-  width: 100vw;
-  height: 2px;                 /* thin line */
-  transform: translateY(-50%);
-  z-index: 2147483647;         /* always on top */
+  inset: 0;
+  display: grid;
+  place-items: center;
+  z-index: 2147483647;
   pointer-events: none;
   opacity: 1;
-  visibility: visible;
+  transition: opacity 450ms ease;
 }
 
-#page-loader-bar{
-  width: 100%;
-  height: 100%;
-  transform-origin: 50% 50%;
-  transform: translateX(-50%) scaleX(0.06);
-  left: 50%;
-  position: relative;
-  background: linear-gradient(90deg, #BCE9F2, #EAC697, #FEF5F0);
-  will-change: transform;
+#circle-loader svg{
+  width: 50vh;
+  height: 50vh;
+  overflow: visible;
+}
+
+#circle-loader .track{
+  fill: none;
+  stroke: rgba(255,255,255,0.25);
+  stroke-width: 0.5;
+}
+
+#circle-loader .progress{
+  fill: none;
+  stroke: #EAC697;
+  stroke-width: 0.5;
+  stroke-linecap: round;
+  transform: rotate(-90deg);
+  transform-origin: 60px 60px;
+  stroke-dasharray: 326.73;   /* 2πr where r=52 */
+  stroke-dashoffset: 326.73;  /* start empty */
+ 
 }
