@@ -5,7 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>FKW • Aayat Scroll → Scatter Particles</title>
   <link rel="stylesheet" href="styles.css" />
-
   <script type="importmap">
     {
       "imports": {
@@ -15,11 +14,13 @@
     }
   </script>
 </head>
-
 <body>
-  <!-- Loader (thin gradient line) -->
-  <div id="page-loader" aria-hidden="true">
-    <div id="page-loader-bar"></div>
+  <!-- Circle Loader -->
+  <div id="circle-loader" aria-hidden="true">
+    <svg viewBox="0 0 120 120" role="presentation">
+      <circle class="track" cx="60" cy="60" r="52"></circle>
+      <circle class="progress" cx="60" cy="60" r="52"></circle>
+    </svg>
   </div>
 
   <canvas id="webgl"></canvas>
