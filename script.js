@@ -31,6 +31,10 @@ function loaderDone(){
   setTimeout(() => circleLoader.remove(), 520);
 }
 
+/* ---------------- PERF TUNING ---------------- */
+const MAX_DPR = 1.25;            // cap retina cost (big win on iMac)
+const BLOOM_RES_SCALE = 1;     // bloom at lower res (big win)
+
 /* ---------------- CONFIG ---------------- */
 const MODEL_GLTF = 'https://broti1987.github.io/FKW-Aayat-Animation/models/Aayat_s.glb';
 const BEAD_GLTF  = 'https://broti1987.github.io/FKW-Aayat-Animation/models/Aayat3.glb';
@@ -45,7 +49,9 @@ const GOLD_ROUGHNESS      = 0.15;
 const HERO_SCALE  = 17.0;
 const TRACK_SCALE = 17.0;
 
-const PARTICLE_COUNT = 400;
+/* 👇 dynamic counts (we’ll tune by viewport + DPR) */
+let PARTICLE_COUNT = 400;
+
 const SCATTER_RADIUS = 5.0 / HERO_SCALE;
 const BEAD_SCALE     = 0.055 / HERO_SCALE;
 const INWARD_BIAS    = 0;
@@ -85,7 +91,8 @@ const FG_HOVER_FREQ_MIN  = 0.03;
 const FG_HOVER_FREQ_MAX  = 0.35;
 
 /* --- Petals --- */
-const FG_PETAL_COUNT      = 1000;
+let FG_PETAL_COUNT      = 1000;
+
 const FG_PETAL_COLORS     = [0xF89B57, 0xF9BF68, 0xFFEF72];
 const FG_PETAL_OPACITY    = 0.95;
 const FG_PETAL_SIZE_MIN   = 0.001;
@@ -107,8 +114,30 @@ const HERO_BREATH = { amp: 0.6, freq: 0.2 };
 const HERO_RETURN_SPEED = 3.0;
 const SCROLL_TOP_EPS = 0.001;
 
+/* --- viewport + DPR count tuning --- */
+function applyViewportCounts(){
+  const w = Math.max(window.innerWidth, document.documentElement.clientWidth || 0);
+  const dpr = window.devicePixelRatio || 1;
+
+  // defaults
+  PARTICLE_COUNT = 400;
+  FG_PETAL_COUNT = 1000;
+
+  // 1920px+ (your “big screens”)
+  if (w >= 1920){
+    PARTICLE_COUNT = 650;
+    FG_PETAL_COUNT = 1600;
+  }
+
+  // retina penalty (iMac lag = usually DPR 2)
+  if (dpr >= 1.75){
+    PARTICLE_COUNT = Math.max(250, Math.round(PARTICLE_COUNT * 0.75));
+    FG_PETAL_COUNT = Math.max(600, Math.round(FG_PETAL_COUNT * 0.70));
+  }
+}
+
 /* ---------------- STATE ---------------- */
-let renderer, composer;
+let renderer, composer, bloomPass;
 let bgScene, bgCamera, bgMaterial;
 let scene, camera, controls;
 
@@ -122,11 +151,18 @@ const clock = new THREE.Clock();
 let fgBokehGroup = null, fgBokehSprites = [], fgBokehParams = [];
 let fgPetalGroup = null, fgPetalSprites = [], fgPetalParams = [];
 
+// spin wrappers
 let bokehSpin = null;
 let petalSpin = null;
 let heroSpin  = null;
 
 let fgScatterTarget = 0.0, fgScatter = 0.0;
+
+/* ---------------- TEMP OBJECTS (NO GC) ---------------- */
+const _tmpQ      = new THREE.Quaternion();
+const _tmpHover  = new THREE.Vector3();
+const _tmpScatter= new THREE.Vector3();
+const _beadDummy = new THREE.Object3D();
 
 /* -------- Passes & Shaders -------- */
 class ClearDepthPass extends Pass { constructor(){ super(); this.needsSwap = false; } render(r){ r.clearDepth(); } }
@@ -197,6 +233,9 @@ async function init(){
   const canvas = document.getElementById('webgl');
   if (!canvas) { console.warn('No #webgl canvas'); loaderDone(); return; }
 
+  // tune counts before building
+  applyViewportCounts();
+
   // Manager drives circle loader
   const manager = new THREE.LoadingManager();
   manager.onProgress = (_url, loaded, total) => loaderSet(total ? loaded / total : 0);
@@ -207,7 +246,7 @@ async function init(){
   const rgbeLoader = new RGBELoader(manager);
 
   renderer = new THREE.WebGLRenderer({ antialias:true, canvas, alpha:true });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, MAX_DPR));
   renderer.setSize(innerWidth, innerHeight);
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -238,7 +277,10 @@ async function init(){
 
   // Composer
   composer = new EffectComposer(renderer);
-  const bgPass = new RenderPass(bgScene, bgCamera); bgPass.clear = true; composer.addPass(bgPass);
+
+  const bgPass = new RenderPass(bgScene, bgCamera);
+  bgPass.clear = true;
+  composer.addPass(bgPass);
 
   const bgHslPass = new ShaderPass(HSLShader);
   bgHslPass.uniforms.uHueShift.value = BG_HSL.hueShift;
@@ -248,8 +290,16 @@ async function init(){
 
   composer.addPass(new ClearDepthPass());
 
-  const mainPass = new RenderPass(scene, camera); mainPass.clear = false; composer.addPass(mainPass);
-  composer.addPass(new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.2, 2, 0.9));
+  const mainPass = new RenderPass(scene, camera);
+  mainPass.clear = false;
+  composer.addPass(mainPass);
+
+  // Bloom at lower internal resolution (big perf win)
+  bloomPass = new UnrealBloomPass(
+    new THREE.Vector2(innerWidth * BLOOM_RES_SCALE, innerHeight * BLOOM_RES_SCALE),
+    0.2, 2, 0.9
+  );
+  composer.addPass(bloomPass);
 
   const baseGold = new THREE.MeshStandardMaterial({
     color: GOLD_COLOR, metalness: 1.0, roughness: GOLD_ROUGHNESS,
@@ -322,8 +372,7 @@ async function init(){
   animate();
 }
 
-/* ---------------- REMAINDER: helpers + loop + shader ---------------- */
-/* NOTE: This is your original code from here down (unchanged) */
+/* ---------------- HELPERS + LOOP ---------------- */
 
 function estimateArea(geometry){
   const pos=geometry.attributes.position, idx=geometry.index;
@@ -407,7 +456,7 @@ function makeQuatsFromNormals(normals){
 }
 function buildBeads(geom, material, posArray, quats, scale){
   const count=posArray.length/3; const inst=new THREE.InstancedMesh(geom, material, count);
-  const dummy=new THREE.Object3D();
+  const dummy=_beadDummy;
   for(let i=0;i<count;i++){
     dummy.position.set(posArray[i*3],posArray[i*3+1],posArray[i*3+2]);
     if(quats) dummy.quaternion.copy(quats[i]);
@@ -417,6 +466,8 @@ function buildBeads(geom, material, posArray, quats, scale){
   inst.instanceMatrix.needsUpdate = true;
   return inst;
 }
+
+/* ---------------- FG: BOKEH ---------------- */
 function createBokehTexture(size=256){
   const cvs = document.createElement('canvas'); cvs.width = cvs.height = size;
   const ctx = cvs.getContext('2d');
@@ -456,24 +507,8 @@ function createForegroundBokeh(group, target){
     group.add(spr);
   }
 }
-function updateForegroundBokeh(t, dt){
-  const kOut = 1.0 - Math.exp(-FG_SCATTER_OUT_FAST * dt);
-  const kIn  = 1.0 - Math.exp(-FG_BACK_IN_SLOW  * dt);
-  fgScatter += (fgScatter < fgScatterTarget) ? (fgScatterTarget - fgScatter) * kOut : (fgScatterTarget - fgScatter) * kIn;
 
-  const q = new THREE.Quaternion();
-  for (let i=0; i<fgBokehSprites.length; i++){
-    const spr = fgBokehSprites[i], p = fgBokehParams[i];
-    q.setFromAxisAngle(p.axis, p.angVel * dt); p.basePos.applyQuaternion(q);
-    const hover = p.hoverAxis.clone().multiplyScalar( Math.sin(t * p.hoverFreq + p.phase) * p.hoverAmp );
-    const scatter = p.scatterOffset.clone().multiplyScalar(fgScatter);
-    spr.position.copy(p.basePos).add(hover).add(scatter);
-    const tw = (Math.sin(t * p.speed + p.phase) * 0.5 + 0.5);
-    spr.material.opacity = THREE.MathUtils.lerp(FG_BOKEH_TWINKLE.min, FG_BOKEH_TWINKLE.max, tw) * (1.0 - 0.4*fgScatter);
-    const scalePulse = THREE.MathUtils.lerp(0.9, 1.15, tw) * (1.0 - 0.5*fgScatter);
-    spr.scale.set(p.baseScale * scalePulse, p.baseScale * scalePulse, 1);
-  }
-}
+/* ---------------- PETALS ---------------- */
 function createPetalTexture(size=256){
   const s = size, cvs = document.createElement('canvas'); cvs.width = cvs.height = s;
   const ctx = cvs.getContext('2d'); ctx.clearRect(0,0,s,s); ctx.translate(s/2, s*0.60);
@@ -521,29 +556,18 @@ function createForegroundPetals(group, target){
     const spinVel  = THREE.MathUtils.lerp(FG_PETAL_SPIN_MIN, FG_PETAL_SPIN_MAX, Math.random());
 
     fgPetalSprites.push(mesh);
-    fgPetalParams.push({ basePos, axis, angVel, phase: Math.random()*Math.PI*2,
-      hoverAxis, hoverAmp, hoverFreq, scatterOffset, baseScale: mesh.scale.clone(), spinAxis, spinVel });
+    fgPetalParams.push({
+      basePos, axis, angVel, phase: Math.random()*Math.PI*2,
+      hoverAxis, hoverAmp, hoverFreq,
+      scatterOffset,
+      baseScale: mesh.scale.clone(),
+      spinAxis, spinVel
+    });
     group.add(mesh);
   }
 }
-function updateForegroundPetals(t, dt){
-  const kOut = 1.0 - Math.exp(-FG_SCATTER_OUT_FAST * dt);
-  const kIn  = 1.0 - Math.exp(-FG_BACK_IN_SLOW  * dt);
-  fgScatter += (fgScatter < fgScatterTarget) ? (fgScatterTarget - fgScatter) * kOut : (fgScatterTarget - fgScatter) * kIn;
-  const q = new THREE.Quaternion();
-  for (let i=0; i<fgPetalSprites.length; i++){
-    const mesh = fgPetalSprites[i], p = fgPetalParams[i];
-    q.setFromAxisAngle(p.axis, p.angVel * dt); p.basePos.applyQuaternion(q);
-    const hover = p.hoverAxis.clone().multiplyScalar( Math.sin(t * p.hoverFreq + p.phase) * p.hoverAmp );
-    const scatter = p.scatterOffset.clone().multiplyScalar(fgScatter);
-    mesh.position.copy(p.basePos).add(hover).add(scatter);
-    const tw = (Math.sin(t * 0.6 + p.phase) * 0.5 + 0.5);
-    const scalePulse = THREE.MathUtils.lerp(0.95, 1.10, tw) * (1.0 - 0.4*fgScatter);
-    mesh.scale.set(p.baseScale.x * scalePulse, p.baseScale.y * scalePulse, 1);
-    mesh.rotateOnAxis(p.spinAxis, p.spinVel * dt);
-    mesh.material.opacity = FG_PETAL_OPACITY * (1.0 - 0.35*fgScatter);
-  }
-}
+
+/* ---------------- OPACITY HELPERS ---------------- */
 function setHeroOpacity(a){
   heroOpacity = THREE.MathUtils.clamp(a,0,1);
   if (heroMaterial){
@@ -560,7 +584,62 @@ function setBeadOpacity(a){
     particles.material.needsUpdate = true;
   }
 }
+
+/* ---------------- SCATTER EASING (do once per frame) ---------------- */
+function updateFgScatter(dt){
+  const kOut = 1.0 - Math.exp(-FG_SCATTER_OUT_FAST * dt);
+  const kIn  = 1.0 - Math.exp(-FG_BACK_IN_SLOW  * dt);
+  fgScatter += (fgScatter < fgScatterTarget)
+    ? (fgScatterTarget - fgScatter) * kOut
+    : (fgScatterTarget - fgScatter) * kIn;
+}
+
+/* ---------------- UPDATE LOOPS (NO CLONES / NO GC) ---------------- */
+function updateForegroundBokeh(t, dt){
+  for (let i=0; i<fgBokehSprites.length; i++){
+    const spr = fgBokehSprites[i], p = fgBokehParams[i];
+
+    _tmpQ.setFromAxisAngle(p.axis, p.angVel * dt);
+    p.basePos.applyQuaternion(_tmpQ);
+
+    _tmpHover.copy(p.hoverAxis).multiplyScalar(Math.sin(t * p.hoverFreq + p.phase) * p.hoverAmp);
+    _tmpScatter.copy(p.scatterOffset).multiplyScalar(fgScatter);
+
+    spr.position.copy(p.basePos).add(_tmpHover).add(_tmpScatter);
+
+    const tw = (Math.sin(t * p.speed + p.phase) * 0.5 + 0.5);
+    spr.material.opacity =
+      THREE.MathUtils.lerp(FG_BOKEH_TWINKLE.min, FG_BOKEH_TWINKLE.max, tw) * (1.0 - 0.4*fgScatter);
+
+    const scalePulse = THREE.MathUtils.lerp(0.9, 1.15, tw) * (1.0 - 0.5*fgScatter);
+    spr.scale.set(p.baseScale * scalePulse, p.baseScale * scalePulse, 1);
+  }
+}
+
+function updateForegroundPetals(t, dt){
+  for (let i=0; i<fgPetalSprites.length; i++){
+    const mesh = fgPetalSprites[i], p = fgPetalParams[i];
+
+    _tmpQ.setFromAxisAngle(p.axis, p.angVel * dt);
+    p.basePos.applyQuaternion(_tmpQ);
+
+    _tmpHover.copy(p.hoverAxis).multiplyScalar(Math.sin(t * p.hoverFreq + p.phase) * p.hoverAmp);
+    _tmpScatter.copy(p.scatterOffset).multiplyScalar(fgScatter);
+
+    mesh.position.copy(p.basePos).add(_tmpHover).add(_tmpScatter);
+
+    const tw = (Math.sin(t * 0.6 + p.phase) * 0.5 + 0.5);
+    const scalePulse = THREE.MathUtils.lerp(0.95, 1.10, tw) * (1.0 - 0.4*fgScatter);
+    mesh.scale.set(p.baseScale.x * scalePulse, p.baseScale.y * scalePulse, 1);
+
+    mesh.rotateOnAxis(p.spinAxis, p.spinVel * dt);
+    mesh.material.opacity = FG_PETAL_OPACITY * (1.0 - 0.35*fgScatter);
+  }
+}
+
+/* ---------------- LOOP ---------------- */
 const Q_IDENTITY = new THREE.Quaternion();
+
 function animate(){
   requestAnimationFrame(animate);
   const dt = clock.getDelta();
@@ -568,6 +647,9 @@ function animate(){
 
   const scrollS = THREE.MathUtils.clamp(getScrollY()/innerHeight, 0, 1);
   fgScatterTarget = scrollS;
+
+  // update scatter once per frame (used by both bokeh + petals)
+  updateFgScatter(dt);
 
   if (particles){
     if (scrollS > 0 && !particles.visible){ particles.visible = true;  setBeadOpacity(1.0); }
@@ -580,9 +662,10 @@ function animate(){
   const newHero = THREE.MathUtils.lerp(heroOpacity, target, eased);
   setHeroOpacity(newHero);
 
+  // Scatter beads with scroll (hero-local space) — reuse dummy (no alloc)
   if (particles && basePositions && offsets){
     const s = scrollS;
-    const dummy = new THREE.Object3D();
+    const dummy = _beadDummy;
     const count = basePositions.length/3;
     for (let i=0; i<count; i++){
       dummy.position.set(
@@ -598,11 +681,13 @@ function animate(){
     particles.instanceMatrix.needsUpdate = true;
   }
 
+  // HERO idle breathing & return-to-zero
   if (heroGroup && heroSpin){
     if (scrollS <= SCROLL_TOP_EPS){
       heroGroup.rotation.x = 0;
       heroGroup.rotation.z = 0;
       heroGroup.rotation.y = Math.sin(t * HERO_BREATH.freq) * HERO_BREATH.amp;
+
       const backK = 1.0 - Math.exp(-HERO_RETURN_SPEED * dt);
       heroSpin.quaternion.slerp(Q_IDENTITY, backK);
     } else {
@@ -611,24 +696,38 @@ function animate(){
     }
   }
 
+  // Independent group spins
   if (bokehSpin) bokehSpin.rotateOnAxis(BOKEH_GROUP_ROT.axis, BOKEH_GROUP_ROT.speed * dt);
   if (petalSpin) petalSpin.rotateOnAxis(PETAL_GROUP_ROT.axis, PETAL_GROUP_ROT.speed * dt);
 
   if (bgMaterial?.uniforms?.uTime) bgMaterial.uniforms.uTime.value = t;
+
   updateForegroundBokeh(t, dt);
   updateForegroundPetals(t, dt);
 
   controls.update();
   composer.render();
 }
+
+/* ---------------- RESIZE ---------------- */
 window.addEventListener('resize', ()=>{
   camera.aspect = innerWidth/innerHeight; camera.updateProjectionMatrix();
+
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, MAX_DPR));
   renderer.setSize(innerWidth, innerHeight);
+
   composer.setSize(innerWidth, innerHeight);
+
+  if (bloomPass) {
+    bloomPass.setSize(innerWidth * BLOOM_RES_SCALE, innerHeight * BLOOM_RES_SCALE);
+  }
+
   if (bgMaterial?.uniforms?.uResolution){
     bgMaterial.uniforms.uResolution.value.set(innerWidth, innerHeight);
   }
 });
+
+/* -------------- BG LIQUID SHADER -------------- */
 function makeMeshGradientShader(colors, cfg){
   const cArr = new Float32Array([
     colors[0].r, colors[0].g, colors[0].b,
