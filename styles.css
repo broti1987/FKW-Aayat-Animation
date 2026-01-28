@@ -64,7 +64,7 @@ h1, h2 {
 #circle-loader .progress{
   fill: none;
   stroke: #EAC697;
-  stroke-width: 0.5;
+  stroke-width: 2;
   stroke-linecap: round;
   transform: rotate(-90deg);
   transform-origin: 60px 60px;
